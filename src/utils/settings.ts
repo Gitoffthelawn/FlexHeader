@@ -708,8 +708,10 @@ function useFlexHeaderSettings() {
   };
 
   /**
-   * Merges pages from sync storage with local pages, avoiding duplicates based on page name and the set of headerName and headerValue pairs in each page's headers.
-   * Only the page name and the headerName/headerValue fields of each header are considered for deduplication; other properties such as headerEnabled, headerType, id, and filters are ignored.
+   * Merges pages from sync storage with local pages, avoiding duplicates.
+   * Deduplication is based on page name, sorted headers (by headerName and headerValue),
+   * and sorted filters (by type and value). The comparison uses these sorted properties
+   * to generate a unique key for each page.
    * @param localPages The current local pages
    * @param syncPages The pages from sync storage
    * @returns The merged pages array
@@ -819,10 +821,26 @@ function useFlexHeaderSettings() {
     try {
       const newSyncEnabled = !syncEnabled;
 
+      // Save sync preference first to avoid race conditions with auto-save
+      await saveToStorage(SYNC_ENABLED_KEY, newSyncEnabled, 'local');
+      setSyncEnabled(newSyncEnabled);
+
       if (newSyncEnabled) {
         // Enabling sync - check for existing sync data and merge if needed
         log("SETTINGS: Enabling sync, checking for existing sync data to merge", "info");
         
+        // Check if migration has already been completed to avoid re-merging
+        const migrationComplete = await loadFromStorage(MIGRATION_COMPLETE_KEY, false, ['local']);
+        if (migrationComplete) {
+          log("SETTINGS: Migration already complete, skipping merge", "info");
+          alertContext.setAlert({
+            alertType: "success",
+            alertText: "Sync enabled! Your settings will now sync across browsers.",
+            location: "bottom",
+          });
+          return;
+        }
+
         const syncPages = await loadPagesFromSync();
         
         if (syncPages && syncPages.length > 0) {
@@ -834,14 +852,23 @@ function useFlexHeaderSettings() {
             const newPagesCount = mergedPages.length - pagesData.pages.length;
             log(`SETTINGS: Merged ${newPagesCount} pages from sync storage`, "info");
             
+            // Try to preserve the selected page, or select the first enabled page
+            const currentSelectedPage = pagesData.pages[pagesData.selectedPage];
+            let newSelectedPage = currentSelectedPage 
+              ? mergedPages.findIndex((p) => p.name === currentSelectedPage.name)
+              : -1;
+            if (newSelectedPage === -1) {
+              newSelectedPage = mergedPages.findIndex((p) => p.enabled);
+            }
+            if (newSelectedPage === -1) {
+              newSelectedPage = 0; // fallback
+            }
+            
             // Update state with merged pages
             setPagesData({
               pages: mergedPages,
-              selectedPage: 0,
+              selectedPage: newSelectedPage,
             });
-            
-            // Mark migration as complete
-            await saveToStorage(MIGRATION_COMPLETE_KEY, true, 'local');
             
             alertContext.setAlert({
               alertType: "info",
@@ -862,6 +889,9 @@ function useFlexHeaderSettings() {
             location: "bottom",
           });
         }
+
+        // Mark migration as complete for all successful sync enable paths
+        await saveToStorage(MIGRATION_COMPLETE_KEY, true, 'local');
       } else {
         // Disabling sync
         alertContext.setAlert({
@@ -870,10 +900,6 @@ function useFlexHeaderSettings() {
           location: "bottom",
         });
       }
-
-      // Save the new sync preference
-      await saveToStorage(SYNC_ENABLED_KEY, newSyncEnabled, 'local');
-      setSyncEnabled(newSyncEnabled);
     } catch (error) {
       console.error("Error toggling sync:", error);
       alertContext.setAlert({
