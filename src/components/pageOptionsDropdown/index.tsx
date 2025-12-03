@@ -6,15 +6,19 @@ import Button from "../button";
 const PageOptionsDropdown = ({
   page,
   darkModeEnabled,
+  syncEnabled,
   removePage,
   updatePageName,
   toggleDarkMode,
+  toggleSync,
 }: {
   page: Page;
   darkModeEnabled: boolean;
+  syncEnabled: boolean;
   removePage: () => void;
   updatePageName: (name: string, id: number) => void;
   toggleDarkMode: () => void;
+  toggleSync: () => void;
 }) => {
   const [show, setShow] = useState(false);
   const optionButtonRef = useRef<HTMLDivElement>(null);
@@ -93,12 +97,25 @@ const PageOptionsDropdown = ({
               </span>
             }
           />
-          {/* <FeedbackButton
-            onClick={_addCurrentPageAsPreset}
+        </div>
+        <div className="page-options-dropdown__item">
+          <Button
+            onClick={toggleSync}
             width="full"
-            content="Save Page to Preset"
-            intermediateContent={<img src="/icons/check.svg" alt="Saved" />}
-          /> */}
+            content={
+              <span
+                style={{
+                  display: "flex",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
+              >
+                <img src="/icons/sync.svg" alt="Sync" />
+                {syncEnabled ? "Disable Sync" : "Enable Sync"}
+              </span>
+            }
+          />
         </div>
         <div className="page-options-dropdown__item">
           <Button onClick={_removePage} width="full" content="Delete Page" />

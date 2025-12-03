@@ -1,7 +1,7 @@
-import { PAGE_KEY_PREFIX, SETTINGS_V3_META_KEY, SETTINGS_KEY, SYNC_INTERVAL, LAST_SYNC_TIME_KEY, SELECTED_PAGE_KEY } from "../constants";
+import { PAGE_KEY_PREFIX, SETTINGS_V3_META_KEY, SETTINGS_KEY, SYNC_INTERVAL, LAST_SYNC_TIME_KEY, SELECTED_PAGE_KEY, SYNC_ENABLED_KEY } from "../constants";
 import { Page, PagesData, SettingsV3Meta } from "../utils/settings";
 import browser from "webextension-polyfill";
-import { getAllFromStorage, saveToStorage, getDataSizeInBytes } from "../utils/storage";
+import { getAllFromStorage, saveToStorage, getDataSizeInBytes, loadFromStorage } from "../utils/storage";
 import { log } from "../utils/log";
 
 const allResourceTypes = Object.values(
@@ -135,9 +135,17 @@ export async function getAndApplyHeaderRules() {
 /**
  * Syncs data from local storage to sync storage
  * This function will be called periodically to ensure data is synced across devices
+ * Only syncs if sync is enabled in user preferences
  */
 export async function syncLocalToRemoteStorage() {
   try {
+    // Check if sync is enabled
+    const syncEnabled = await loadFromStorage(SYNC_ENABLED_KEY, false, ['local']);
+    if (!syncEnabled) {
+      log("BACKGROUND: Sync is disabled, skipping sync to remote storage", "info");
+      return;
+    }
+
     log("BACKGROUND: Starting sync from local to remote storage", "info");
 
     // Get metadata from local storage
