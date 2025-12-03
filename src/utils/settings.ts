@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useAlert } from "../context/alertContext";
 import browser from "webextension-polyfill";
-import { SELECTED_PAGE_KEY, SETTINGS_KEY, SETTINGS_V3_META_KEY, PAGE_KEY_PREFIX } from "../constants";
+import { SELECTED_PAGE_KEY, SETTINGS_KEY, SETTINGS_V3_META_KEY, PAGE_KEY_PREFIX, SYNC_ENABLED_KEY, MIGRATION_COMPLETE_KEY } from "../constants";
 import { saveToStorage, loadFromStorage, clearStorage, getAllFromStorage, getDataSizeInBytes } from "./storage";
 import { log } from "./log";
 
@@ -98,6 +98,7 @@ function useFlexHeaderSettings() {
     selectedPage: defaultPage.id,
   });
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
+  const [syncEnabled, setSyncEnabled] = useState(false);
   const [hasInitialized, setHasInitialized] = useState(false);
   const isSavingRef = useRef<boolean>(false);
 
@@ -263,6 +264,14 @@ function useFlexHeaderSettings() {
       }
     } catch (error) {
       console.error("Failed to load dark mode setting:", error);
+    }
+
+    // Load sync preference
+    try {
+      const syncEnabledValue = await loadFromStorage(SYNC_ENABLED_KEY, false, ['local']);
+      setSyncEnabled(syncEnabledValue);
+    } catch (error) {
+      console.error("Failed to load sync preference:", error);
     }
 
     try {
@@ -699,6 +708,160 @@ function useFlexHeaderSettings() {
   };
 
   /**
+   * Merges pages from sync storage with local pages, avoiding duplicates based on page name and headers
+   * @param localPages The current local pages
+   * @param syncPages The pages from sync storage
+   * @returns The merged pages array
+   */
+  const mergePages = (localPages: Page[], syncPages: Page[]): Page[] => {
+    // Create a map of local pages for comparison
+    const localPagesMap = new Map<string, Page>();
+    localPages.forEach(page => {
+      // Create a unique key based on page name and header content
+      const key = `${page.name}_${JSON.stringify(page.headers.map(h => ({ name: h.headerName, value: h.headerValue })))}`;
+      localPagesMap.set(key, page);
+    });
+
+    // Find sync pages that don't exist in local storage
+    const newPagesFromSync: Page[] = [];
+    syncPages.forEach(syncPage => {
+      const key = `${syncPage.name}_${JSON.stringify(syncPage.headers.map(h => ({ name: h.headerName, value: h.headerValue })))}`;
+      if (!localPagesMap.has(key)) {
+        newPagesFromSync.push(syncPage);
+      }
+    });
+
+    if (newPagesFromSync.length === 0) {
+      return localPages;
+    }
+
+    // Merge the pages and re-index
+    const mergedPages = [...localPages, ...newPagesFromSync].map((page, index) => ({
+      ...page,
+      id: index,
+      enabled: index === 0, // Only first page is enabled by default after merge
+    }));
+
+    return mergedPages;
+  };
+
+  /**
+   * Loads pages from sync storage
+   * @returns The pages from sync storage or null if none found
+   */
+  const loadPagesFromSync = async (): Promise<Page[] | null> => {
+    try {
+      // Check for v3 format in sync storage
+      const syncMeta = await browser.storage.sync.get(SETTINGS_V3_META_KEY);
+      const meta = syncMeta[SETTINGS_V3_META_KEY] as SettingsV3Meta | undefined;
+
+      if (meta) {
+        const pagePromises = [];
+        for (let i = 0; i < meta.pageCount; i++) {
+          pagePromises.push(browser.storage.sync.get(`${PAGE_KEY_PREFIX}${i}`));
+        }
+        const pageResults = await Promise.all(pagePromises);
+        const pages = pageResults
+          .map((result, index) => result[`${PAGE_KEY_PREFIX}${index}`] as Page)
+          .filter(Boolean)
+          .map(page => ({
+            ...page,
+            headers: page.headers?.map((h: any) => ({
+              ...h,
+              headerType: h.headerType || "request",
+            })) || []
+          }));
+        return pages.length > 0 ? pages : null;
+      }
+
+      // Check for legacy v2 format
+      const v2Data = await browser.storage.sync.get(SETTINGS_KEY);
+      if (v2Data[SETTINGS_KEY]) {
+        return (v2Data[SETTINGS_KEY] as PagesData).pages;
+      }
+
+      return null;
+    } catch (error) {
+      console.error("Failed to load pages from sync storage:", error);
+      return null;
+    }
+  };
+
+  /**
+   * Toggle sync feature
+   * When enabling sync, merges sync data with local data to avoid data loss
+   */
+  const toggleSync = async () => {
+    try {
+      const currentSyncEnabled = await loadFromStorage(SYNC_ENABLED_KEY, false, ['local']);
+      const newSyncEnabled = !currentSyncEnabled;
+
+      if (newSyncEnabled) {
+        // Enabling sync - check for existing sync data and merge if needed
+        log("SETTINGS: Enabling sync, checking for existing sync data to merge", "info");
+        
+        const syncPages = await loadPagesFromSync();
+        
+        if (syncPages && syncPages.length > 0) {
+          // There is existing sync data, perform merge
+          const mergedPages = mergePages(pagesData.pages, syncPages);
+          
+          if (mergedPages.length > pagesData.pages.length) {
+            // New pages were added from sync
+            const newPagesCount = mergedPages.length - pagesData.pages.length;
+            log(`SETTINGS: Merged ${newPagesCount} pages from sync storage`, "info");
+            
+            // Update state with merged pages
+            setPagesData({
+              pages: mergedPages,
+              selectedPage: 0,
+            });
+            
+            // Mark migration as complete
+            await saveToStorage(MIGRATION_COMPLETE_KEY, true, 'local');
+            
+            alertContext.setAlert({
+              alertType: "info",
+              alertText: `Sync enabled! ${newPagesCount} page(s) merged from other browsers.`,
+              location: "bottom",
+            });
+          } else {
+            alertContext.setAlert({
+              alertType: "success",
+              alertText: "Sync enabled! Your settings will now sync across browsers.",
+              location: "bottom",
+            });
+          }
+        } else {
+          alertContext.setAlert({
+            alertType: "success",
+            alertText: "Sync enabled! Your settings will now sync across browsers.",
+            location: "bottom",
+          });
+        }
+      } else {
+        // Disabling sync
+        alertContext.setAlert({
+          alertType: "info",
+          alertText: "Sync disabled. Settings will only be stored locally.",
+          location: "bottom",
+        });
+      }
+
+      // Save the new sync preference
+      await saveToStorage(SYNC_ENABLED_KEY, newSyncEnabled, 'local');
+      setSyncEnabled(newSyncEnabled);
+    } catch (error) {
+      console.error("Error toggling sync:", error);
+      alertContext.setAlert({
+        alertType: "error",
+        alertText: "Failed to toggle sync. Please try again.",
+        location: "bottom",
+      });
+    }
+  };
+
+  /**
    * Import json file
    */
   const importSettings = (file: File) => {
@@ -752,6 +915,7 @@ function useFlexHeaderSettings() {
     pages: pagesData.pages,
     selectedPage: pagesData.selectedPage,
     darkModeEnabled,
+    syncEnabled,
     isSaving: isSavingRef.current,
     addPage,
     removePage,
@@ -768,6 +932,7 @@ function useFlexHeaderSettings() {
     changePageIndex,
     importSettings,
     toggleDarkMode,
+    toggleSync,
   };
 }
 

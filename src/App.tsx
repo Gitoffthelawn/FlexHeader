@@ -37,6 +37,7 @@ function App() {
     pages,
     selectedPage,
     darkModeEnabled,
+    syncEnabled,
     addHeader,
     saveHeaders,
     updateHeader,
@@ -51,6 +52,7 @@ function App() {
     importSettings,
     changePageIndex,
     toggleDarkMode,
+    toggleSync,
   } = useFlexHeaderSettings();
   const alertContext = useAlert();
   const { shouldShow: shouldShowReviewPrompt, loading: reviewPromptLoading, hidePrompt } = useReviewPrompt();
@@ -258,12 +260,14 @@ function App() {
             <PagesTabs
               currentPage={currentPage}
               darkModeEnabled={darkModeEnabled}
+              syncEnabled={syncEnabled}
               addPage={_addPage}
               updatePageName={_updatePageName}
               updatePageKeepEnabled={_changePageKeepEnabled}
               removePage={removePage}
               changePageIndex={changePageIndex}
               toggleDarkMode={toggleDarkMode}
+              toggleSync={toggleSync}
             />
             <div key={selectedPage} className="app__body__contents">
               <div>
