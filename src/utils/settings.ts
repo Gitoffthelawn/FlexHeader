@@ -715,8 +715,24 @@ function useFlexHeaderSettings() {
    */
   const mergePages = (localPages: Page[], syncPages: Page[]): Page[] => {
     // Helper function to create unique key for page comparison
-    const getPageKey = (page: Page): string => 
-      `${page.name}_${JSON.stringify(page.headers.map(h => ({ name: h.headerName, value: h.headerValue })))}`;
+    const getPageKey = (page: Page): string => {
+      // Sort headers and filters for stable key
+      const sortedHeaders = [...page.headers].sort((a, b) => {
+        if (a.headerName !== b.headerName) return a.headerName.localeCompare(b.headerName);
+        if (a.headerValue !== b.headerValue) return a.headerValue.localeCompare(b.headerValue);
+        return 0;
+      });
+      const sortedFilters = [...page.filters].sort((a, b) => {
+        // Assuming filters have a 'type' and 'value' property; adjust as needed
+        if (a.type !== b.type) return a.type.localeCompare(b.type);
+        if (a.value !== b.value) return String(a.value).localeCompare(String(b.value));
+        return 0;
+      });
+      return `${page.name}_${JSON.stringify({
+        headers: sortedHeaders,
+        filters: sortedFilters,
+      })}`;
+    };
 
     // Create a map of local pages for comparison
     const localPagesMap = new Map<string, Page>();
