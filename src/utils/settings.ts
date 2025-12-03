@@ -714,19 +714,20 @@ function useFlexHeaderSettings() {
    * @returns The merged pages array
    */
   const mergePages = (localPages: Page[], syncPages: Page[]): Page[] => {
+    // Helper function to create unique key for page comparison
+    const getPageKey = (page: Page): string => 
+      `${page.name}_${JSON.stringify(page.headers.map(h => ({ name: h.headerName, value: h.headerValue })))}`;
+
     // Create a map of local pages for comparison
     const localPagesMap = new Map<string, Page>();
     localPages.forEach(page => {
-      // Create a unique key based on page name and header content
-      const key = `${page.name}_${JSON.stringify(page.headers.map(h => ({ name: h.headerName, value: h.headerValue })))}`;
-      localPagesMap.set(key, page);
+      localPagesMap.set(getPageKey(page), page);
     });
 
     // Find sync pages that don't exist in local storage
     const newPagesFromSync: Page[] = [];
     syncPages.forEach(syncPage => {
-      const key = `${syncPage.name}_${JSON.stringify(syncPage.headers.map(h => ({ name: h.headerName, value: h.headerValue })))}`;
-      if (!localPagesMap.has(key)) {
+      if (!localPagesMap.has(getPageKey(syncPage))) {
         newPagesFromSync.push(syncPage);
       }
     });
@@ -735,12 +736,18 @@ function useFlexHeaderSettings() {
       return localPages;
     }
 
-    // Merge the pages and re-index
-    const mergedPages = [...localPages, ...newPagesFromSync].map((page, index) => ({
-      ...page,
-      id: index,
-      enabled: index === 0, // Only first page is enabled by default after merge
-    }));
+    // Merge the pages and re-index, preserving enabled state for local pages
+    const mergedPages = [
+      ...localPages.map((page, index) => ({
+        ...page,
+        id: index,
+      })),
+      ...newPagesFromSync.map((page, index) => ({
+        ...page,
+        id: localPages.length + index,
+        enabled: false, // New pages from sync are disabled by default
+      }))
+    ];
 
     return mergedPages;
   };
@@ -793,8 +800,7 @@ function useFlexHeaderSettings() {
    */
   const toggleSync = async () => {
     try {
-      const currentSyncEnabled = await loadFromStorage(SYNC_ENABLED_KEY, false, ['local']);
-      const newSyncEnabled = !currentSyncEnabled;
+      const newSyncEnabled = !syncEnabled;
 
       if (newSyncEnabled) {
         // Enabling sync - check for existing sync data and merge if needed
