@@ -708,7 +708,8 @@ function useFlexHeaderSettings() {
   };
 
   /**
-   * Merges pages from sync storage with local pages, avoiding duplicates based on page name and headers
+   * Merges pages from sync storage with local pages, avoiding duplicates based on page name and the set of headerName and headerValue pairs in each page's headers.
+   * Only the page name and the headerName/headerValue fields of each header are considered for deduplication; other properties such as headerEnabled, headerType, id, and filters are ignored.
    * @param localPages The current local pages
    * @param syncPages The pages from sync storage
    * @returns The merged pages array
